@@ -325,5 +325,3 @@ Built with [Flask](https://flask.palletsprojects.com), [Anthropic Claude](https:
 This project was **designed, directed, and built by a human developer**. Every architectural decision, feature requirement, security design, and implementation detail was conceived and guided by a person — not generated autonomously by AI.
 
 [Claude AI](https://anthropic.com) was used as a coding assistant throughout development — helping write boilerplate, suggest implementations, and accelerate iteration — in the same way a developer might use any other tool. All logic, structure, and intent behind the project is human-authored.
-
-> *"AI wrote the code. A human wrote the software."*
