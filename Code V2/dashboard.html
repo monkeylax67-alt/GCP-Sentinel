@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GCP Sentinel — Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#020b14;--panel:#040f1c;--border:#0d3a5c;--border-bright:#1a6b9e;
+  --accent:#00d4ff;--accent2:#00ff9d;--danger:#ff3d3d;--warn:#ffb300;
+  --text:#c8e8ff;--text-dim:#4a7a9b;
+  --mono:'Share Tech Mono',monospace;--sans:'Rajdhani',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,212,255,.015) 2px,rgba(0,212,255,.015) 4px);pointer-events:none;z-index:9999}
+body::after{content:'';position:fixed;inset:0;background-image:linear-gradient(rgba(0,212,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.04) 1px,transparent 1px);background-size:40px 40px;pointer-events:none;z-index:0}
+.app{position:relative;z-index:1;display:flex;flex-direction:column;min-height:100vh}
+
+/* Header */
+header{display:flex;align-items:center;justify-content:space-between;padding:10px 20px;border-bottom:1px solid var(--border);background:rgba(4,15,28,.96);backdrop-filter:blur(12px);position:sticky;top:0;z-index:100}
+.logo{display:flex;align-items:center;gap:10px}
+.logo h1{font-family:var(--sans);font-weight:700;font-size:18px;letter-spacing:3px;color:var(--accent)}
+.logo p{font-family:var(--mono);font-size:9px;color:var(--text-dim);letter-spacing:2px}
+.header-right{display:flex;align-items:center;gap:14px}
+.mode-badge{padding:4px 10px;border-radius:2px;font-family:var(--mono);font-size:9px;letter-spacing:1px}
+.mode-badge.live{border:1px solid var(--accent2);color:var(--accent2);background:rgba(0,255,157,.08)}
+.mode-badge.demo{border:1px solid var(--warn);color:var(--warn);background:rgba(255,179,0,.08)}
+.user-chip{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:9px;color:var(--text-dim);border:1px solid var(--border);padding:4px 10px;border-radius:2px}
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);animation:pulse 1.5s infinite;display:inline-block}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+.logout-btn{padding:4px 10px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:var(--mono);font-size:9px;cursor:pointer;border-radius:2px;transition:all .2s;letter-spacing:1px}
+.logout-btn:hover{border-color:var(--danger);color:var(--danger)}
+
+/* Alert */
+#alertBanner{display:none;position:fixed;top:0;left:0;right:0;background:var(--danger);color:#fff;font-family:var(--mono);font-size:11px;letter-spacing:2px;text-align:center;padding:7px;z-index:10000;animation:flashBg .5s infinite alternate}
+#alertBanner.show{display:block}
+@keyframes flashBg{from{background:#cc0000}to{background:#ff3d3d}}
+
+/* Stats */
+.stats-bar{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;padding:8px 8px 0}
+.stat-card{border:1px solid var(--border);background:rgba(4,15,28,.9);padding:10px 14px;border-radius:2px;position:relative;overflow:hidden}
+.stat-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.stat-card.danger::before{background:var(--danger)}
+.stat-card.warn::before{background:var(--warn)}
+.stat-card.ok::before{background:var(--accent2)}
+.stat-card.info::before{background:var(--accent)}
+.stat-label{font-family:var(--mono);font-size:8px;letter-spacing:2px;color:var(--text-dim);text-transform:uppercase;margin-bottom:5px}
+.stat-value{font-family:var(--mono);font-size:22px;line-height:1}
+.stat-card.danger .stat-value{color:var(--danger)}
+.stat-card.warn .stat-value{color:var(--warn)}
+.stat-card.ok .stat-value{color:var(--accent2)}
+.stat-card.info .stat-value{color:var(--accent)}
+.stat-sub{font-family:var(--mono);font-size:8px;color:var(--text-dim);margin-top:3px}
+
+/* Grid */
+.main{display:grid;grid-template-columns:280px 1fr 280px;gap:0;flex:1}
+.panel{border:1px solid var(--border);background:rgba(4,15,28,.8);margin:6px;border-radius:2px;display:flex;flex-direction:column;overflow:hidden}
+.panel-header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.panel-title{font-family:var(--mono);font-size:9px;letter-spacing:2px;color:var(--accent);text-transform:uppercase}
+.panel-badge{font-family:var(--mono);font-size:8px;padding:2px 7px;border:1px solid currentColor;border-radius:1px}
+.panel-body{padding:8px;flex:1;overflow-y:auto}
+
+/* Threats */
+.threat-item{padding:8px 10px;border:1px solid var(--border);border-left:3px solid var(--danger);margin-bottom:6px;border-radius:1px;animation:slideIn .35s ease}
+@keyframes slideIn{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:translateX(0)}}
+.threat-item.WARNING{border-left-color:var(--warn)}
+.threat-item.INFO{border-left-color:var(--accent)}
+.threat-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:3px}
+.threat-sev{font-family:var(--mono);font-size:9px;font-weight:600;letter-spacing:1px}
+.threat-item .threat-sev{color:var(--danger)}
+.threat-item.WARNING .threat-sev{color:var(--warn)}
+.threat-time{font-family:var(--mono);font-size:8px;color:var(--text-dim)}
+.threat-desc{font-size:11px;color:var(--text);margin-bottom:5px;line-height:1.4}
+.threat-meta{display:flex;gap:5px;flex-wrap:wrap}
+.meta-chip{font-family:var(--mono);font-size:8px;padding:2px 5px;border:1px solid var(--border-bright);color:var(--text-dim);border-radius:1px}
+.meta-chip.btn-chip{color:var(--accent);border-color:var(--accent);cursor:pointer}
+.meta-chip.btn-chip:hover{background:rgba(0,212,255,.1)}
+
+/* Auto-response badge */
+.auto-response-badge{margin-top:6px;padding:5px 8px;background:rgba(0,255,157,.06);border:1px solid rgba(0,255,157,.25);border-radius:1px;font-family:var(--mono);font-size:9px;color:var(--accent2);display:none}
+.auto-response-badge.show{display:block}
+
+/* Chat */
+.chat-area{display:flex;flex-direction:column;height:100%}
+.quick-actions{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px 8px 4px}
+.quick-btn{padding:6px 7px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:var(--mono);font-size:8px;letter-spacing:.5px;cursor:pointer;border-radius:2px;text-align:left;transition:all .2s;line-height:1.4}
+.quick-btn:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,212,255,.05)}
+.ai-loading{height:2px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200%;animation:shimmer 1.5s infinite;display:none;margin:0 8px 3px}
+.ai-loading.active{display:block}
+@keyframes shimmer{0%{background-position:0%}100%{background-position:200%}}
+.chat-messages{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:8px;max-height:380px}
+.msg{display:flex;gap:7px;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.msg.user{flex-direction:row-reverse}
+.msg-avatar{width:26px;height:26px;border-radius:2px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:8px;flex-shrink:0;border:1px solid var(--border-bright)}
+.msg.ai .msg-avatar{background:rgba(0,212,255,.1);color:var(--accent)}
+.msg.user .msg-avatar{background:rgba(0,255,157,.1);color:var(--accent2)}
+.msg-bubble{max-width:86%;padding:8px 11px;border-radius:2px;font-size:11px;line-height:1.5;border:1px solid var(--border)}
+.msg.ai .msg-bubble{background:rgba(0,212,255,.04);border-color:rgba(0,212,255,.2)}
+.msg.user .msg-bubble{background:rgba(0,255,157,.04);border-color:rgba(0,255,157,.2)}
+.streaming-cursor{display:inline-block;width:5px;height:11px;background:var(--accent);animation:blink .8s infinite;vertical-align:middle;margin-left:2px}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.chat-input-row{display:flex;gap:5px;padding:8px;border-top:1px solid var(--border)}
+.chat-input{flex:1;background:rgba(0,212,255,.04);border:1px solid var(--border-bright);color:var(--text);font-family:var(--mono);font-size:10px;padding:6px 9px;border-radius:2px;outline:none;transition:border-color .2s}
+.chat-input:focus{border-color:var(--accent)}
+.chat-input::placeholder{color:var(--text-dim)}
+
+/* Buttons */
+.btn{padding:5px 12px;border:1px solid var(--accent);background:rgba(0,212,255,.08);color:var(--accent);font-family:var(--mono);font-size:9px;letter-spacing:1px;cursor:pointer;border-radius:2px;transition:all .2s;white-space:nowrap}
+.btn:hover{background:rgba(0,212,255,.2)}
+.btn.danger{border-color:var(--danger);background:rgba(255,61,61,.08);color:var(--danger)}
+.btn.danger:hover{background:rgba(255,61,61,.2)}
+.btn.success{border-color:var(--accent2);background:rgba(0,255,157,.08);color:var(--accent2)}
+.btn.success:hover{background:rgba(0,255,157,.2)}
+
+/* Servers */
+.server-item{display:flex;align-items:center;justify-content:space-between;padding:8px 9px;border:1px solid var(--border);margin-bottom:5px;border-radius:2px;transition:all .3s}
+.server-item.TERMINATED{border-color:rgba(255,61,61,.3);background:rgba(255,61,61,.04);opacity:.7}
+.server-info{flex:1}
+.server-name{font-family:var(--mono);font-size:10px;color:var(--text);margin-bottom:2px}
+.server-zone{font-family:var(--mono);font-size:8px;color:var(--text-dim)}
+.server-status-wrap{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8px;margin:0 8px}
+.status-dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:pulse 2s infinite}
+.status-dot.TERMINATED{background:var(--danger);animation:none}
+.status-text.RUNNING{color:var(--accent2)}
+.status-text.TERMINATED{color:var(--danger)}
+
+/* Log */
+.log-entry{display:flex;gap:7px;padding:4px 0;border-bottom:1px solid rgba(13,58,92,.4);font-family:var(--mono);font-size:9px}
+.log-time{color:var(--text-dim);flex-shrink:0}
+.log-msg{flex:1}
+.log-entry.danger .log-msg{color:var(--danger)}
+.log-entry.warn .log-msg{color:var(--warn)}
+.log-entry.ok .log-msg{color:var(--accent2)}
+
+/* Blocked IPs */
+.ip-item{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border:1px solid rgba(255,61,61,.2);background:rgba(255,61,61,.04);margin-bottom:4px;border-radius:1px;font-family:var(--mono);font-size:10px}
+.ip-addr{color:var(--danger)}
+.revoked-item{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;border:1px solid rgba(255,179,0,.2);background:rgba(255,179,0,.04);margin-bottom:4px;border-radius:1px;font-family:var(--mono);font-size:9px;color:var(--warn)}
+
+/* Settings */
+.setting-row{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid rgba(13,58,92,.4);font-family:var(--mono);font-size:9px}
+.setting-row:last-child{border-bottom:none}
+input[type=checkbox]{accent-color:var(--accent);width:13px;height:13px;cursor:pointer}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.sens-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:8px;color:var(--text-dim);margin-top:3px}
+
+/* Bottom grid */
+.bottom-row{display:grid;grid-template-columns:280px 1fr 280px}
+
+/* Tabs */
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border);flex-shrink:0}
+.tab{padding:7px 12px;font-family:var(--mono);font-size:8px;letter-spacing:1px;color:var(--text-dim);cursor:pointer;border-bottom:2px solid transparent;transition:all .2s;text-transform:uppercase}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.tab:hover{color:var(--text)}
+.tab-content{display:none;flex:1;overflow-y:auto;padding:8px}
+.tab-content.active{display:block}
+
+/* Analysis panel */
+#analysisPanel{font-family:var(--mono);font-size:10px;line-height:1.6;color:var(--text);white-space:pre-wrap}
+
+/* Typing */
+.typing{display:flex;gap:3px;align-items:center}
+.typing span{width:5px;height:5px;border-radius:50%;background:var(--accent);animation:bounce 1s infinite}
+.typing span:nth-child(2){animation-delay:.15s}
+.typing span:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,100%{transform:translateY(0);opacity:.4}50%{transform:translateY(-4px);opacity:1}}
+
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-thumb{background:var(--border-bright);border-radius:2px}
+</style>
+</head>
+<body>
+
+<div id="alertBanner">⚠ CRITICAL SECURITY ALERT — UNAUTHORIZED ACCESS DETECTED — AUTO-RESPONSE INITIATED ⚠</div>
+
+<div class="app">
+<header>
+  <div class="logo">
+    <svg width="32" height="32" viewBox="0 0 36 36">
+      <polygon points="18,2 34,11 34,25 18,34 2,25 2,11" stroke="#00d4ff" stroke-width="1.5" fill="rgba(0,212,255,.07)"/>
+      <polygon points="18,9 27,14 27,22 18,27 9,22 9,14" stroke="#00d4ff" stroke-width="1" fill="rgba(0,212,255,.1)"/>
+      <circle cx="18" cy="18" r="3.5" fill="#00d4ff"/>
+    </svg>
+    <div>
+      <h1>GCP SENTINEL</h1>
+      <p>CLOUD SECURITY AI v2</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <span id="modeBadge" class="mode-badge demo">⬤ DEMO</span>
+    <span style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">PROJECT: <span id="projectLabel" style="color:var(--accent)">demo</span></span>
+    <div class="user-chip"><span class="pulse-dot"></span>{{ username }}</div>
+    <a href="/logout"><button class="logout-btn">LOGOUT</button></a>
+  </div>
+</header>
+
+<div class="stats-bar">
+  <div class="stat-card danger"><div class="stat-label">Critical Threats</div><div class="stat-value" id="statThreats">0</div><div class="stat-sub">Needs action</div></div>
+  <div class="stat-card warn"><div class="stat-label">Suspicious</div><div class="stat-value" id="statSuspicious">0</div><div class="stat-sub">All severities</div></div>
+  <div class="stat-card info"><div class="stat-label">Servers</div><div class="stat-value" id="statServers">0/0</div><div class="stat-sub" id="statServersSub">Loading</div></div>
+  <div class="stat-card ok"><div class="stat-label">Blocked</div><div class="stat-value" id="statBlocked">0</div><div class="stat-sub">Attempts today</div></div>
+  <div class="stat-card danger"><div class="stat-label">Blocked IPs</div><div class="stat-value" id="statBlockedIPs">0</div><div class="stat-sub">Firewall rules</div></div>
+  <div class="stat-card warn"><div class="stat-label">Revoked Accts</div><div class="stat-value" id="statRevoked">0</div><div class="stat-sub">IAM stripped</div></div>
+</div>
+
+<div class="main">
+
+  <!-- Left: Threats -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">⚡ Threat Feed</span>
+      <span class="panel-badge" id="threatBadgeLabel" style="color:var(--danger)">LIVE</span>
+    </div>
+    <div class="panel-body" id="threatFeed"></div>
+  </div>
+
+  <!-- Center: AI Chat -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">🤖 AI Security Assistant</span>
+      <span class="panel-badge" style="color:var(--accent)">CLAUDE · STREAMING</span>
+    </div>
+    <div class="chat-area">
+      <div class="quick-actions">
+        <button class="quick-btn" onclick="quickSend('Analyze all current threats and give me a full risk assessment')">📊 Risk Report</button>
+        <button class="quick-btn" onclick="quickSend('List all unknown accounts that tried to log in and what they attempted')">👤 Unknown Logins</button>
+        <button class="quick-btn" onclick="quickSend('Should I shut down any servers right now? Which ones are at risk?')">🔴 Shutdown Advice</button>
+        <button class="quick-btn" onclick="quickSend('What GCP IAM policies should I harden to prevent these attacks?')">🔐 IAM Hardening</button>
+        <button class="quick-btn" onclick="quickSend('How do I configure Cloud Armor to auto-block these IP ranges?')">🛡 Cloud Armor</button>
+        <button class="quick-btn" onclick="quickSend('Give me a full post-incident report with timeline and remediation steps')">📋 Incident Report</button>
+      </div>
+      <div class="ai-loading" id="aiLoading"></div>
+      <div class="chat-messages" id="chatMessages">
+        <div class="msg ai">
+          <div class="msg-avatar">AI</div>
+          <div class="msg-bubble">
+            <strong style="color:var(--accent);font-family:var(--mono);font-size:10px">GCP SENTINEL v2 ONLINE</strong><br>
+            Auto-defense active: IP blocking, IAM revocation, and server shutdown run automatically on CRITICAL threats.<br><br>
+            Ask me anything about your security posture, or hit <strong style="color:var(--accent2)">Simulate Attack</strong> to see full auto-response in action.
+          </div>
+        </div>
+      </div>
+      <div class="chat-input-row">
+        <input class="chat-input" id="chatInput" placeholder="Ask about threats, accounts, servers..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn" onclick="sendChat()">SEND</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Servers + Blocked IPs -->
+  <div class="panel">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('servers',this)">SERVERS</div>
+      <div class="tab" onclick="switchTab('blocked',this)">BLOCKED IPs</div>
+      <div class="tab" onclick="switchTab('revoked',this)">REVOKED</div>
+    </div>
+
+    <div class="tab-content active" id="tab-servers">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:6px;">
+        <button class="btn danger" style="font-size:8px;" onclick="lockdownAll()">☠ LOCKDOWN ALL</button>
+      </div>
+      <div id="serverList"></div>
+    </div>
+
+    <div class="tab-content" id="tab-blocked">
+      <div style="font-family:var(--mono);font-size:8px;color:var(--text-dim);margin-bottom:8px;letter-spacing:1px;">AUTO-BLOCKED FIREWALL RULES</div>
+      <div id="blockedIPList"><div style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">No IPs blocked yet</div></div>
+    </div>
+
+    <div class="tab-content" id="tab-revoked">
+      <div style="font-family:var(--mono);font-size:8px;color:var(--text-dim);margin-bottom:8px;letter-spacing:1px;">AUTO-REVOKED IAM ACCOUNTS</div>
+      <div id="revokedList"><div style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">No accounts revoked yet</div></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="bottom-row">
+
+  <!-- Activity Log -->
+  <div class="panel" style="margin-top:0">
+    <div class="panel-header">
+      <span class="panel-title">📋 Activity Log</span>
+      <span class="panel-badge" id="logBadge" style="color:var(--text-dim)">0</span>
+    </div>
+    <div class="panel-body" id="activityLog" style="max-height:160px"></div>
+  </div>
+
+  <!-- AI Analysis + Audit -->
+  <div class="panel" style="margin-top:0">
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab2('analysis',this)">AI ANALYSIS</div>
+      <div class="tab" onclick="switchTab2('audit',this)">AUDIT LOG</div>
+    </div>
+    <div class="tab-content active" id="tab2-analysis" style="max-height:160px">
+      <div id="analysisPanel" style="font-family:var(--mono);font-size:10px;line-height:1.6;color:var(--text)">
+        AI will auto-analyze incoming threats. Trigger a simulated attack to see it in action.
+      </div>
+    </div>
+    <div class="tab-content" id="tab2-audit" style="max-height:160px">
+      <div id="auditLog"></div>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div class="panel" style="margin-top:0">
+    <div class="panel-header">
+      <span class="panel-title">🛡 Auto-Defense</span>
+      <button class="btn" style="font-size:8px;" onclick="simulateAttack()">▶ SIMULATE</button>
+    </div>
+    <div class="panel-body" style="max-height:160px">
+      <div class="setting-row"><span>Auto-shutdown on unknown login</span><input type="checkbox" id="settAutoShutdown" checked onchange="saveSetting('auto_shutdown',this.checked)"></div>
+      <div class="setting-row"><span>Auto-block IP (firewall rule)</span><input type="checkbox" id="settAutoBlock" checked onchange="saveSetting('auto_block_ip',this.checked)"></div>
+      <div class="setting-row"><span>Auto-revoke IAM account</span><input type="checkbox" id="settAutoRevoke" checked onchange="saveSetting('auto_revoke',this.checked)"></div>
+      <div class="setting-row"><span>AI threat analysis</span><input type="checkbox" id="settAI" checked onchange="saveSetting('ai_analysis',this.checked)"></div>
+      <div class="setting-row"><span>Alert on geo anomaly</span><input type="checkbox" id="settGeo" checked onchange="saveSetting('geo_alert',this.checked)"></div>
+      <div style="margin-top:8px">
+        <div style="font-family:var(--mono);font-size:8px;color:var(--text-dim);margin-bottom:5px">SENSITIVITY</div>
+        <input type="range" min="1" max="5" value="4" id="settSensitivity" onchange="saveSetting('sensitivity',parseInt(this.value))">
+        <div class="sens-labels"><span>LOW</span><span id="sensVal" style="color:var(--accent)">HIGH</span><span>MAX</span></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+const socket = io();
+let streamingBubble = null, streamingText = '', logCount = 0;
+let blockedIPs = [], revokedAccounts = [];
+
+socket.on('connect', () => { loadState(); });
+socket.on('disconnect', () => addLog('⚠ Disconnected', 'warn'));
+socket.on('threat_update', threat => { prependThreat(threat); if(threat.severity==='CRITICAL') showAlertBanner(5000); });
+socket.on('server_update', s => updateServerRow(s));
+socket.on('stats_update', s => renderStats(s));
+socket.on('log_update', e => prependLog(e));
+socket.on('lockdown', () => showAlertBanner(8000));
+
+socket.on('auto_response', data => {
+  const el = document.getElementById(`ar-${data.threat_id}`);
+  if(el) { el.textContent = '⚡ AUTO: ' + data.actions.join(' | '); el.classList.add('show'); }
+  data.actions.forEach(a => {
+    if(a.includes('Blocked IP')) {
+      const ip = a.match(/\d+\.\d+\.\d+\.\d+/)?.[0];
+      if(ip && !blockedIPs.includes(ip)) { blockedIPs.push(ip); renderBlockedIPs(); }
+    }
+    if(a.includes('Revoked')) {
+      const acct = a.replace('🔐 Revoked ','');
+      if(!revokedAccounts.includes(acct)) { revokedAccounts.push(acct); renderRevokedAccounts(); }
+    }
+  });
+});
+
+socket.on('ai_threat_analysis', data => {
+  document.getElementById('analysisBadge') && (document.getElementById('analysisBadge').textContent = data.time);
+  document.getElementById('analysisPanel').innerHTML = formatMsg(data.analysis);
+  loadAuditLog();
+});
+
+socket.on('chat_chunk', data => {
+  streamingText += data.chunk;
+  if(!streamingBubble) {
+    removeTyping();
+    const div = document.createElement('div');
+    div.className='msg ai';
+    div.innerHTML=`<div class="msg-avatar">AI</div><div class="msg-bubble" id="streamBubble"></div>`;
+    document.getElementById('chatMessages').appendChild(div);
+    streamingBubble = document.getElementById('streamBubble');
+    document.getElementById('aiLoading').classList.remove('active');
+  }
+  streamingBubble.innerHTML = formatMsg(streamingText)+'<span class="streaming-cursor"></span>';
+  scrollChat();
+});
+
+socket.on('chat_done', data => {
+  if(streamingBubble){ streamingBubble.innerHTML=formatMsg(data.full); streamingBubble=null; streamingText=''; }
+  document.getElementById('aiLoading').classList.remove('active');
+  scrollChat();
+});
+
+async function loadState() {
+  const res  = await fetch('/api/state');
+  const data = await res.json();
+  renderStats(data.stats);
+  document.getElementById('serverList').innerHTML='';
+  data.servers.forEach(s => appendServer(s));
+  document.getElementById('threatFeed').innerHTML='';
+  [...data.threats].reverse().forEach(t => prependThreat(t));
+  data.activity_log.reverse().forEach(e => prependLog(e));
+  blockedIPs = data.blocked_ips || [];
+  revokedAccounts = data.revoked_accounts || [];
+  renderBlockedIPs(); renderRevokedAccounts();
+  // Settings
+  document.getElementById('settAutoShutdown').checked = data.settings.auto_shutdown;
+  document.getElementById('settAutoBlock').checked    = data.settings.auto_block_ip;
+  document.getElementById('settAutoRevoke').checked   = data.settings.auto_revoke;
+  document.getElementById('settAI').checked           = data.settings.ai_analysis;
+  document.getElementById('settGeo').checked          = data.settings.geo_alert;
+  document.getElementById('settSensitivity').value    = data.settings.sensitivity;
+  if(data.stats.gcp_enabled){
+    document.getElementById('modeBadge').textContent='⬤ LIVE GCP';
+    document.getElementById('modeBadge').className='mode-badge live';
+    document.getElementById('projectLabel').textContent=data.stats.gcp_project||'live';
+  }
+  loadAuditLog();
+}
+
+function renderStats(s) {
+  document.getElementById('statThreats').textContent    = s.threats;
+  document.getElementById('statSuspicious').textContent = s.suspicious;
+  document.getElementById('statServers').textContent    = `${s.servers_online}/${s.servers_total}`;
+  document.getElementById('statServersSub').textContent = `${s.servers_online} online`;
+  document.getElementById('statBlocked').textContent    = s.blocked;
+  document.getElementById('statBlockedIPs').textContent = s.blocked_ips || blockedIPs.length;
+  document.getElementById('statRevoked').textContent    = s.revoked_accounts || revokedAccounts.length;
+}
+
+function prependThreat(t) {
+  const feed = document.getElementById('threatFeed');
+  const el   = document.createElement('div');
+  el.className=`threat-item ${t.severity}`;
+  el.id=`threat-${t.id}`;
+  const icon = t.severity==='CRITICAL'?'🔴':t.severity==='WARNING'?'🟡':'🔵';
+  el.innerHTML=`
+    <div class="threat-header">
+      <span class="threat-sev">${icon} ${t.severity}</span>
+      <span class="threat-time">${t.time}</span>
+    </div>
+    <div class="threat-desc">${t.desc}</div>
+    <div class="threat-meta">
+      <span class="meta-chip">IP: ${t.ip}</span>
+      <span class="meta-chip">GEO: ${t.country}</span>
+      ${t.instance?`<span class="meta-chip">SRV: ${t.instance}</span>`:''}
+      <span class="meta-chip">${t.source||'LIVE'}</span>
+      <span class="meta-chip btn-chip" onclick="quickSend('Investigate: \`${t.desc}\` from IP ${t.ip} (${t.country}). What should I do?')">🤖 Ask AI</span>
+    </div>
+    <div class="auto-response-badge" id="ar-${t.id}"></div>
+  `;
+  feed.insertBefore(el, feed.firstChild);
+  document.getElementById('threatBadgeLabel').textContent=`${document.querySelectorAll('.threat-item').length} ALERTS`;
+  while(feed.children.length>25) feed.removeChild(feed.lastChild);
+}
+
+function appendServer(s) {
+  const el=document.createElement('div');
+  el.className=`server-item ${s.status}`;
+  el.id=`srv-${s.id}`;
+  el.innerHTML=serverHTML(s);
+  document.getElementById('serverList').appendChild(el);
+}
+function updateServerRow(s) {
+  let el=document.getElementById(`srv-${s.id}`);
+  if(!el){appendServer(s);return}
+  el.className=`server-item ${s.status}`;
+  el.innerHTML=serverHTML(s);
+}
+function serverHTML(s) {
+  const running=s.status==='RUNNING';
+  return `
+    <div class="server-info">
+      <div class="server-name">${s.name}</div>
+      <div class="server-zone">${s.zone}</div>
+    </div>
+    <div class="server-status-wrap">
+      <div class="status-dot ${s.status}"></div>
+      <span class="status-text ${s.status}">${s.status}</span>
+    </div>
+    ${running
+      ?`<button class="btn danger" style="font-size:8px;padding:3px 7px" onclick="shutdownServer('${s.id}')">STOP</button>`
+      :`<button class="btn success" style="font-size:8px;padding:3px 7px" onclick="restoreServer('${s.id}')">START</button>`
+    }
+  `;
+}
+
+async function shutdownServer(id) {
+  await fetch(`/api/server/${id}/shutdown`,{method:'POST'});
+}
+async function restoreServer(id) {
+  await fetch(`/api/server/${id}/restore`,{method:'POST'});
+}
+async function lockdownAll() {
+  if(!confirm('⚠ EMERGENCY LOCKDOWN: Shut down ALL running servers?')) return;
+  await fetch('/api/lockdown',{method:'POST'});
+  showAlertBanner(8000);
+}
+
+function renderBlockedIPs() {
+  const el=document.getElementById('blockedIPList');
+  if(!blockedIPs.length){el.innerHTML='<div style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">No IPs blocked yet</div>';return}
+  el.innerHTML=blockedIPs.map(ip=>`
+    <div class="ip-item">
+      <span class="ip-addr">🚫 ${ip}</span>
+      <span style="font-size:8px;color:var(--text-dim)">BLOCKED</span>
+    </div>
+  `).join('');
+}
+function renderRevokedAccounts() {
+  const el=document.getElementById('revokedList');
+  if(!revokedAccounts.length){el.innerHTML='<div style="font-family:var(--mono);font-size:9px;color:var(--text-dim)">No accounts revoked yet</div>';return}
+  el.innerHTML=revokedAccounts.map(a=>`
+    <div class="revoked-item">🔐 ${a}</div>
+  `).join('');
+}
+
+async function loadAuditLog() {
+  try {
+    const res  = await fetch('/api/audit-log');
+    const data = await res.json();
+    const el   = document.getElementById('auditLog');
+    el.innerHTML = data.slice(0,30).map(e=>`
+      <div class="log-entry">
+        <span class="log-time">${e.time.split(' ')[1]}</span>
+        <span class="log-msg" style="color:var(--text)">[${e.user}@${e.ip}] ${e.action} ${e.detail?'— '+e.detail:''}</span>
+      </div>
+    `).join('');
+  } catch(e){}
+}
+
+function prependLog(entry) {
+  logCount++;
+  const el=document.createElement('div');
+  el.className=`log-entry ${entry.level}`;
+  el.innerHTML=`<span class="log-time">${entry.time}</span><span class="log-msg">${entry.msg}</span>`;
+  const log=document.getElementById('activityLog');
+  log.insertBefore(el,log.firstChild);
+  while(log.children.length>60) log.removeChild(log.lastChild);
+  document.getElementById('logBadge').textContent=logCount;
+}
+function addLog(msg,level){prependLog({time:new Date().toTimeString().slice(0,8),msg,level})}
+
+async function saveSetting(key,value){
+  await fetch('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({[key]:value})});
+  const labels={1:'LOW',2:'MODERATE',3:'MEDIUM',4:'HIGH',5:'MAX'};
+  if(key==='sensitivity') document.getElementById('sensVal').textContent=labels[value]||'HIGH';
+}
+
+async function simulateAttack(){
+  const res=await fetch('/api/simulate',{method:'POST'});
+  const data=await res.json();
+  if(data.ok) showAlertBanner(5000);
+}
+
+function sendChat(){
+  const input=document.getElementById('chatInput');
+  const msg=input.value.trim(); if(!msg) return;
+  input.value='';
+  appendUserMsg(msg);
+  showTypingIndicator();
+  document.getElementById('aiLoading').classList.add('active');
+  socket.emit('chat_message',{message:msg});
+}
+function quickSend(msg){
+  appendUserMsg(msg);
+  showTypingIndicator();
+  document.getElementById('aiLoading').classList.add('active');
+  socket.emit('chat_message',{message:msg});
+}
+function appendUserMsg(msg){
+  const div=document.createElement('div');
+  div.className='msg user';
+  div.innerHTML=`<div class="msg-avatar">YOU</div><div class="msg-bubble">${msg}</div>`;
+  document.getElementById('chatMessages').appendChild(div);
+  scrollChat();
+}
+function showTypingIndicator(){
+  removeTyping();
+  const div=document.createElement('div');
+  div.className='msg ai';div.id='typingIndicator';
+  div.innerHTML=`<div class="msg-avatar">AI</div><div class="msg-bubble"><div class="typing"><span></span><span></span><span></span></div></div>`;
+  document.getElementById('chatMessages').appendChild(div);
+  scrollChat();
+}
+function removeTyping(){const el=document.getElementById('typingIndicator');if(el)el.remove()}
+function scrollChat(){const el=document.getElementById('chatMessages');el.scrollTop=el.scrollHeight}
+function formatMsg(text){
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\n/g,'<br>')
+    .replace(/\*\*(.*?)\*\*/g,'<strong style="color:var(--accent);font-family:var(--mono);font-size:10px">$1</strong>')
+    .replace(/`(.*?)`/g,'<span style="font-family:var(--mono);font-size:9px;color:var(--accent2);background:rgba(0,255,157,.08);padding:1px 4px;border-radius:2px">$1</span>');
+}
+
+function showAlertBanner(ms=5000){
+  const el=document.getElementById('alertBanner');
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),ms);
+}
+
+function switchTab(name,el){
+  document.querySelectorAll('#tab-servers,#tab-blocked,#tab-revoked').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.panel .tabs .tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  el.classList.add('active');
+}
+function switchTab2(name,el){
+  document.querySelectorAll('#tab2-analysis,#tab2-audit').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.bottom-row .tabs .tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab2-'+name).classList.add('active');
+  el.classList.add('active');
+  if(name==='audit') loadAuditLog();
+}
+
+// Refresh audit log periodically
+setInterval(loadAuditLog, 15000);
+document.getElementById('settSensitivity').addEventListener('input',function(){
+  const labels={1:'LOW',2:'MODERATE',3:'MEDIUM',4:'HIGH',5:'MAX'};
+  document.getElementById('sensVal').textContent=labels[this.value]||'HIGH';
+});
+</script>
+</body>
+</html>
